@@ -14,6 +14,7 @@ class SQLDataSource extends DataSource {
 
     this.context;
     this.cache;
+    this.runCache = {};
     this.db = Knex(knexConfig);
 
     const _this = this;
@@ -40,15 +41,33 @@ class SQLDataSource extends DataSource {
       .update(query.toString())
       .digest("base64");
 
-    return this.cache.get(cacheKey).then(entry => {
-      if (entry) return Promise.resolve(JSON.parse(entry));
+    if (DEBUG && this.runCache[cacheKey])
+      console.log(`SQL cache use (${ttl}) [${cacheKey}]`);
 
-      return query.then(rows => {
-        if (rows) this.cache.set(cacheKey, JSON.stringify(rows), { ttl });
+    return (
+      this.runCache[cacheKey] ||
+      (this.runCache[cacheKey] = this.cache.get(cacheKey).then(entry => {
+        if (DEBUG)
+          console.log(
+            `SQL cache ${
+              entry ? "get" : "new"
+            } (${ttl}) [${cacheKey}] ${query.toString()}`
+          );
+        if (entry) return Promise.resolve(JSON.parse(entry));
 
-        return Promise.resolve(rows);
-      });
-    });
+        return query.then(result => {
+          if (DEBUG)
+            console.log(
+              `SQL cache set (${ttl}) [${cacheKey}] ${query.toString()}`
+            );
+          this.cache.set(cacheKey, JSON.stringify(result), { ttl }).then(() => {
+            delete this.runCache[cacheKey];
+          });
+
+          return result;
+        });
+      }))
+    );
   }
 }
 
